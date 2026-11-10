@@ -12,7 +12,7 @@ cmake -S "$PS3BASE" -B "$BUILD" -G Ninja \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
       -DPS3BASE_GENERATED_DIR="$LIFT/ppu" \
       -DGOWA_SPU_GENERATED_DIR="$LIFT/spu" \
-      -DPS3BASE_SPU_NATIVE_GEN_DIR="$LIFT/spu"
+      -DPS3BASE_SPU_NATIVE_GEN_DIR="$LIFT/spu_native"
 
 note "building"
 cmake --build "$BUILD" -j "$JOBS" --target ps3base

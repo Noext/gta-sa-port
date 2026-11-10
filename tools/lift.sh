@@ -52,6 +52,11 @@ subprocess.run(
     [sys.executable, os.path.join(pkg, "recomp", "spu", "codegen.py"), out_spu,
      os.path.join(lift, "empty_manifest.txt")],
     check=True)
+# The runtime's CMake refuses to configure unless the native SPU directory says
+# what it holds. For a title with no SPU code the honest answer is an empty
+# stamp: "there are none, by design", not a missing directory.
+os.makedirs(os.path.join(lift, "spu_native"), exist_ok=True)
+open(os.path.join(lift, "spu_native", "generated.txt"), "w").close()
 print("lift: SPU registry in", out_spu, "(0 blocks, by design)")
 PY
 

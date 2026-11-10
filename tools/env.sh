@@ -9,7 +9,14 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export ROOT
 
 # The port's runtime checkout. In this repository it is the sibling tree the
-# patches in port/patches are meant for; set PS3BASE to point elsewhere.
+# patches in port/patches are meant for; set PS3BASE to point elsewhere. The
+# release ships no copy of it, so a player's checkout is often next to the port
+# rather than inside it: look there too, and say where it was found.
+if [ -z "${PS3BASE:-}" ]; then
+    for candidate in "$ROOT/third_party/ps3base" "$ROOT/../ps3base" "$ROOT/../ps3base2"; do
+        if [ -d "$candidate/recomp/ppu" ]; then PS3BASE=$candidate; break; fi
+    done
+fi
 PS3BASE=${PS3BASE:-"$ROOT/third_party/ps3base"}
 export PS3BASE
 
