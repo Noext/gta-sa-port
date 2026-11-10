@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+title: "Project Grove"
+message: "If you use or refer to this project, cite it as below."
+type: software
+license: MIT
+repository-code: "https://github.com/Noext/gta-sa-port"
+abstract: >-
+  An unofficial PC port of Grand Theft Auto: San Andreas for PS3 (BLES02219), made by static
+  recompilation of the game's PowerPC code to C++ with a reimplemented PS3 system library layer
+  and a Vulkan RSX backend. Contains no game material.
+keywords:
+  - ps3
+  - static-recompilation
+  - vulkan
+  - linux

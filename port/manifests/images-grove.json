@@ -1,0 +1,42 @@
+[
+ {
+  "name": "grove",
+  "elf": "../../Game/EBOOT.elf",
+  "file": "Game/EBOOT.elf"
+ },
+ {
+  "name": "liblv2",
+  "elf": "../../Game/fw/liblv2.elf",
+  "file": "Game/fw/liblv2.elf"
+ },
+ {
+  "name": "libsysmodule",
+  "elf": "../../Game/fw/libsysmodule.elf",
+  "file": "Game/fw/libsysmodule.elf"
+ },
+ {
+  "name": "libsre",
+  "elf": "../../Game/fw/libsre.elf",
+  "file": "Game/fw/libsre.elf"
+ },
+ {
+  "name": "libgcm_sys",
+  "elf": "../../Game/fw/libgcm_sys.elf",
+  "file": "Game/fw/libgcm_sys.elf"
+ },
+ {
+  "name": "libfs",
+  "elf": "../../Game/fw/libfs.elf",
+  "file": "Game/fw/libfs.elf"
+ },
+ {
+  "name": "libvdec",
+  "elf": "../../Game/fw/libvdec.elf",
+  "file": "Game/fw/libvdec.elf"
+ },
+ {
+  "name": "libsmvd2",
+  "elf": "../../Game/fw/libsmvd2.elf",
+  "file": "Game/fw/libsmvd2.elf"
+ }
+]

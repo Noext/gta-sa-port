@@ -1,0 +1,51 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Grand Theft Auto: San Andreas",
+  "wikidata": "Q210391",
+  "system": "PS3",
+  "type": "recomp",
+  "original": {
+    "region": "EU",
+    "serial": "BLES02219",
+    "revision": "01.02"
+  },
+  "project": "Project Grove",
+  "status": "in-progress",
+  "targets": [
+    "PC (Linux)"
+  ],
+  "toolchain": [
+    "ps3base"
+  ],
+  "approach": "Static recompilation of the PPU code to C++, a reimplementation of the PS3 system libraries, a Vulkan RSX backend",
+  "maintainers": [
+    {
+      "name": "Noext",
+      "link": "https://github.com/Noext"
+    }
+  ],
+  "links": [
+    {
+      "label": "Features",
+      "url": "https://github.com/Noext/gta-sa-port/blob/main/docs/FEATURES.md"
+    },
+    {
+      "label": "Known issues",
+      "url": "https://github.com/Noext/gta-sa-port/blob/main/docs/KNOWN_ISSUES.md"
+    },
+    {
+      "label": "Roadmap",
+      "url": "https://github.com/Noext/gta-sa-port/blob/main/docs/ROADMAP.md"
+    }
+  ],
+  "help": [
+    "Testing on other GPUs (AMD, Intel) and CPUs",
+    "Audio output on a machine with a sound device",
+    "Playing past the opening mission"
+  ],
+  "tags": [
+    "vulkan",
+    "linux"
+  ],
+  "notes": "Needs your own copy of the game (a decrypted EBOOT.elf from your own BLES02219 disc and the four data archives from PS3_GAME/USRDIR); the build happens on your PC. In game at Grove Street with a full HUD, 11 to 26 fps under Xvfb. No SPU code in this title."
+}

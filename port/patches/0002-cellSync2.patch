@@ -1,0 +1,351 @@
+From 6df4dd6212b5fe4058960d38b333e273acb6a80e Mon Sep 17 00:00:00 2001
+From: Noext <1674541+Noext@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 10:26:21 +0000
+Subject: [PATCH] gta-sa: cellSync2, et le jeu est en jeu
+
+Le second titre atteint Grove Street. Mesure : ecran-titre -> cinematique ->
+en jeu avec HUD complet (heure, argent, vie, radar), 11 a 26 fps selon la
+scene, aucun forcage actif, aucun crash. Preuve : docs/recon/gta-ingame.png.
+
+Deux corrections, dans cet ordre :
+
+1. runtime/src/hle/cellSync2.cpp -- 13 imports, module absent du depot.
+   Implemente avec de vrais std::mutex / condition_variable et un semaphore
+   compteur par objet invite. Pas des stubs CELL_OK : D-002 interdit de dire
+   a un titre que son mutex existe quand il n'existe pas, et RPCS3 lui-meme
+   est en todo() + CELL_OK sur ce module, donc il ne pouvait pas servir
+   d'oracle de comportement. Seules ses signatures et tailles de structures
+   sont reprises de cellSync2.h.
+
+2. .gitignore : /out-*/ en plus de /out/. Le motif etait ancre et ne nommait
+   que le dossier par defaut, donc les 22 Mo de code genere du second titre
+   apparaissaient comme non suivis.
+
+Deux erreurs de methode sont consignees dans docs/progress.md plutot que
+corrigees en silence :
+
+- mon compteur "nonblack" sur les PPM dump disait 0/921600 alors que l'ecran
+  affichait un menu lisible. Le dump GPU ne mesure rien sous Xvfb ; j'ai lu
+  un nombre sans verifier ce qu'il mesurait. Seule une capture de fenetre
+  fait foi.
+- chaque run etait lance avec timeout N, et cela fermait la fenetre pendant
+  que l'operateur jouait (gpu: window closed a 74,99 s et 89,99 s, exactement
+  les deux budgets). Un run qu'on mesure se borne ; un run qu'on regarde ne
+  se borne pas.
+
+Reste ouvert : 3 imports non implementes (cellVideoOutGetNumberOfDevice,
+cellGameGetParamInt, cellAudioAddData), un artefact bleu pres du BMX, et les
+shaders .pix/.vert demandes en ENOENT qui ne sont ni sur le disque ni dans les
+deux .obb.
+---
+ runtime/src/hle/cellSync2.cpp | 301 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 305 insertions(+)
+ create mode 100644 runtime/src/hle/cellSync2.cpp
+
+diff --git a/runtime/src/hle/cellSync2.cpp b/runtime/src/hle/cellSync2.cpp
+new file mode 100644
+index 0000000..6195717
+--- /dev/null
++++ b/runtime/src/hle/cellSync2.cpp
+@@ -0,0 +1,301 @@
++#include "common.h"
++
++/* cellSync2: the second-generation synchronisation library.
++ *
++ * This module was absent from the tree entirely; GTA SA imports 13 of its
++ * functions and blocks on them during startup, so a stub returning CELL_OK
++ * would tell the title a mutex existed when it did not -- exactly the failure
++ * D-002 forbids.
++ *
++ * Reference for every signature, structure and constant:
++ *   refs/rpcs3/rpcs3/Emu/Cell/Modules/cellSync2.h
++ *   refs/rpcs3/rpcs3/Emu/Cell/Modules/cellSync2.cpp
++ *
++ * RPCS3 implements this module as todo() + CELL_OK, i.e. it does not
++ * synchronise at all; that is not a usable oracle for correctness, so the
++ * objects here are REAL (a host mutex and a counting semaphore) and the
++ * behaviour is what the header's contract says.
++ *
++ * Object layout. CellSync2Mutex and CellSync2Semaphore are each 128 bytes,
++ * aligned 128, and their contents are opaque to the caller: the title only
++ * ever passes the pointer back to us. The kernel keeps its own state in a table
++ * keyed by that guest address, so the guest bytes are ours to define. The id
++ * and kind are written into the block first so a stale address is refused
++ * rather than silently reused.
++ *
++ * Error codes are the header's, not made up (cellSync2.h:6-20).
++ */
++
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <map>
++#include <memory>
++#include <mutex>
++
++namespace hle {
++
++namespace {
++
++constexpr int32_t SYNC2_AGAIN = static_cast<int32_t>(0x80410C01u);
++constexpr int32_t SYNC2_INVAL = static_cast<int32_t>(0x80410C02u);
++constexpr int32_t SYNC2_NOMEM = static_cast<int32_t>(0x80410C04u);
++constexpr int32_t SYNC2_ALIGN = static_cast<int32_t>(0x80410C10u);
++constexpr int32_t SYNC2_NULL = static_cast<int32_t>(0x80410C11u);
++
++constexpr uint32_t OBJECT_SIZE = 128;
++constexpr uint32_t OBJECT_ALIGN = 128;
++constexpr uint32_t SEM_COUNT_LIMIT = 0x7FFFFF;
++
++/* Attribute blocks are 128 bytes each (cellSync2.h:44,54,65).
++ * Mutex:       sdkVersion u32, threadTypes u16, maxWaiters u16, recursive b8,
++ *              padding u8, name[32], reserved[86]
++ * Semaphore:   sdkVersion u32, threadTypes u16, maxWaiters u16, name[32],
++ *              reserved[88]
++ * Only maxWaiters is read by the entry points, at offset 6 in both. */
++constexpr uint32_t ATTR_MAX_WAITERS = 6;
++
++constexpr uint32_t KIND_MUTEX = 0x4D555833u;   /* "MUX3" */
++constexpr uint32_t KIND_SEMAPHORE = 0x53454D33u; /* "SEM3" */
++
++struct Entry {
++    uint32_t kind = 0;
++    std::mutex m;
++    std::condition_variable cv;
++    int32_t count = 0;      /* semaphore: tokens available; mutex: unused */
++    uint32_t owner = 0;     /* mutex: guest thread id holding it, 0 = free */
++    bool recursive = false;
++};
++
++std::mutex g_table_mutex;
++std::map<uint32_t, std::shared_ptr<Entry>> g_table;
++
++std::shared_ptr<Entry> lookup(uint32_t addr, uint32_t kind)
++{
++    std::lock_guard lk(g_table_mutex);
++    auto it = g_table.find(addr);
++    if (it == g_table.end() || it->second->kind != kind) return nullptr;
++    return it->second;
++}
++
++std::shared_ptr<Entry> create(uint32_t addr, uint32_t kind)
++{
++    auto e = std::make_shared<Entry>();
++    e->kind = kind;
++    std::lock_guard lk(g_table_mutex);
++    g_table[addr] = e;
++    return e;
++}
++
++void destroy(uint32_t addr)
++{
++    std::lock_guard lk(g_table_mutex);
++    g_table.erase(addr);
++}
++
++/* A 128-byte object must be 128-byte aligned; the title passes whatever
++ * cellSync2MutexInitialize's caller allocated, and a misaligned one is a real
++ * error rather than something to paper over. */
++bool aligned(uint32_t addr) { return addr && (addr % OBJECT_ALIGN) == 0; }
++
++/* The guest-visible block records its own kind, so a pointer from the wrong
++ * initialiser is refused. */
++void stamp(uint32_t addr, uint32_t kind)
++{
++    if (vm::range_mapped(addr, 4)) vm::write32(addr, kind);
++}
++
++}  // namespace
++
++HLE_FUNC(cellSync2, _cellSync2MutexAttributeInitialize) {
++    const uint32_t attr = a32(ctx, 0);
++    const uint32_t sdk = a32(ctx, 1);
++    if (!attr || !vm::range_mapped(attr, OBJECT_SIZE)) return ret(ctx, SYNC2_NULL);
++    std::memset(vm::ptr(attr), 0, OBJECT_SIZE);
++    vm::write32(attr, sdk);
++    vm::write16(attr + 4, 0x000F);  /* all thread types, as the reference sets */
++    vm::write16(attr + ATTR_MAX_WAITERS, 15);
++    put_str(attr + 8, "CellSync2Mutex", 32);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, _cellSync2SemaphoreAttributeInitialize) {
++    const uint32_t attr = a32(ctx, 0);
++    const uint32_t sdk = a32(ctx, 1);
++    if (!attr || !vm::range_mapped(attr, OBJECT_SIZE)) return ret(ctx, SYNC2_NULL);
++    std::memset(vm::ptr(attr), 0, OBJECT_SIZE);
++    vm::write32(attr, sdk);
++    vm::write16(attr + 4, 0x000F);
++    vm::write16(attr + ATTR_MAX_WAITERS, 15);
++    put_str(attr + 8, "CellSync2Semaphore", 32);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2MutexEstimateBufferSize) {
++    const uint32_t attr = a32(ctx, 0);
++    const uint32_t out = a32(ctx, 1);
++    if (!attr || !out) return ret(ctx, SYNC2_NULL);
++    if (!vm::range_mapped(attr, OBJECT_SIZE) || !vm::range_mapped(out, 4)) return ret(ctx, SYNC2_NULL);
++    const uint32_t waiters = vm::read16(attr + ATTR_MAX_WAITERS);
++    if (waiters > 0x8000) return ret(ctx, SYNC2_INVAL);
++    /* No kernel-side queue is exposed: the waiters live in this process. A
++     * non-zero answer is what the title checks for, and 0 would read as
++     * "no buffer needed" for a configuration that asked for waiters. */
++    vm::write32(out, waiters ? waiters * 16u : 0u);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2MutexInitialize) {
++    const uint32_t mutex = a32(ctx, 0);
++    const uint32_t buffer = a32(ctx, 1);
++    const uint32_t attr = a32(ctx, 2);
++    if (!mutex || !attr) return ret(ctx, SYNC2_NULL);
++    if (!aligned(mutex)) return ret(ctx, SYNC2_ALIGN);
++    if (!vm::range_mapped(attr, OBJECT_SIZE)) return ret(ctx, SYNC2_NULL);
++    const uint32_t waiters = vm::read16(attr + ATTR_MAX_WAITERS);
++    if (waiters > 0 && !buffer) return ret(ctx, SYNC2_NULL);
++    if (waiters > 0x8000) return ret(ctx, SYNC2_INVAL);
++
++    auto e = create(mutex, KIND_MUTEX);
++    /* recursive is the byte after maxWaiters: offset 8, after the u8 and its
++     * padding at 6..7 (cellSync2.h:35-41). */
++    e->recursive = vm::range_mapped(attr + 8, 1) && vm::ptr(attr)[8] != 0;
++    stamp(mutex, KIND_MUTEX);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2MutexFinalize) {
++    const uint32_t mutex = a32(ctx, 0);
++    if (!mutex) return ret(ctx, SYNC2_NULL);
++    destroy(mutex);
++    stamp(mutex, 0);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2MutexLock) {
++    const uint32_t mutex = a32(ctx, 0);
++    if (!mutex) return ret(ctx, SYNC2_NULL);
++    auto e = lookup(mutex, KIND_MUTEX);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    const uint32_t self = ctx.thread_id;
++    std::unique_lock lk(e->m);
++    if (e->recursive && e->owner == self) {
++        ret(ctx, 0);
++        return;
++    }
++    e->cv.wait(lk, [&] { return e->owner == 0; });
++    e->owner = self;
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2MutexTryLock) {
++    const uint32_t mutex = a32(ctx, 0);
++    if (!mutex) return ret(ctx, SYNC2_NULL);
++    auto e = lookup(mutex, KIND_MUTEX);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    const uint32_t self = ctx.thread_id;
++    std::lock_guard lk(e->m);
++    if (e->recursive && e->owner == self) return ret(ctx, 0);
++    if (e->owner != 0) return ret(ctx, SYNC2_AGAIN);
++    e->owner = self;
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2MutexUnlock) {
++    const uint32_t mutex = a32(ctx, 0);
++    if (!mutex) return ret(ctx, SYNC2_NULL);
++    auto e = lookup(mutex, KIND_MUTEX);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    std::lock_guard lk(e->m);
++    if (e->owner != ctx.thread_id) {
++        /* Unlocking something you do not hold is PERM in the header's enum
++         * rather than a silent success: a title that reports "unlocked" while
++         * another thread still owns it will corrupt whatever it guarded. */
++        if (e->owner == 0) return ret(ctx, SYNC2_INVAL);
++        return ret(ctx, static_cast<int32_t>(0x80410C09u));  /* PERM */
++    }
++    e->owner = 0;
++    e->cv.notify_one();
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2SemaphoreInitialize) {
++    const uint32_t sem = a32(ctx, 0);
++    const uint32_t buffer = a32(ctx, 1);
++    const int32_t initial = s32(ctx, 2);
++    const uint32_t attr = a32(ctx, 3);
++    if (!sem || !attr) return ret(ctx, SYNC2_NULL);
++    if (!aligned(sem)) return ret(ctx, SYNC2_ALIGN);
++    if (!vm::range_mapped(attr, OBJECT_SIZE)) return ret(ctx, SYNC2_NULL);
++    const uint32_t waiters = vm::read16(attr + ATTR_MAX_WAITERS);
++    if (waiters >= 2 && !buffer) return ret(ctx, SYNC2_NULL);
++    if (initial > 0x7FFFFF || initial < -0x800000 || waiters == 0) return ret(ctx, SYNC2_INVAL);
++    if (waiters == 1 && buffer) return ret(ctx, SYNC2_INVAL);
++
++    auto e = create(sem, KIND_SEMAPHORE);
++    e->count = initial;
++    stamp(sem, KIND_SEMAPHORE);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2SemaphoreFinalize) {
++    const uint32_t sem = a32(ctx, 0);
++    if (!sem) return ret(ctx, SYNC2_NULL);
++    destroy(sem);
++    stamp(sem, 0);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2SemaphoreAcquire) {
++    const uint32_t sem = a32(ctx, 0);
++    const uint32_t count = a32(ctx, 1);
++    if (!sem) return ret(ctx, SYNC2_NULL);
++    if (count > SEM_COUNT_LIMIT) return ret(ctx, SYNC2_INVAL);
++    auto e = lookup(sem, KIND_SEMAPHORE);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    std::unique_lock lk(e->m);
++    e->cv.wait(lk, [&] { return e->count >= static_cast<int32_t>(count); });
++    e->count -= static_cast<int32_t>(count);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2SemaphoreTryAcquire) {
++    const uint32_t sem = a32(ctx, 0);
++    const uint32_t count = a32(ctx, 1);
++    if (!sem) return ret(ctx, SYNC2_NULL);
++    if (count > SEM_COUNT_LIMIT) return ret(ctx, SYNC2_INVAL);
++    auto e = lookup(sem, KIND_SEMAPHORE);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    std::lock_guard lk(e->m);
++    if (e->count < static_cast<int32_t>(count)) return ret(ctx, SYNC2_AGAIN);
++    e->count -= static_cast<int32_t>(count);
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2SemaphoreRelease) {
++    const uint32_t sem = a32(ctx, 0);
++    const uint32_t count = a32(ctx, 1);
++    if (!sem) return ret(ctx, SYNC2_NULL);
++    if (count > SEM_COUNT_LIMIT) return ret(ctx, SYNC2_INVAL);
++    auto e = lookup(sem, KIND_SEMAPHORE);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    std::lock_guard lk(e->m);
++    if (e->count > SEM_COUNT_LIMIT - static_cast<int32_t>(count)) return ret(ctx, SYNC2_INVAL);
++    e->count += static_cast<int32_t>(count);
++    e->cv.notify_all();
++    ret(ctx, 0);
++}
++
++HLE_FUNC(cellSync2, cellSync2SemaphoreGetCount) {
++    const uint32_t sem = a32(ctx, 0);
++    const uint32_t out = a32(ctx, 1);
++    if (!sem || !out) return ret(ctx, SYNC2_NULL);
++    if (!vm::range_mapped(out, 4)) return ret(ctx, SYNC2_NULL);
++    auto e = lookup(sem, KIND_SEMAPHORE);
++    if (!e) return ret(ctx, SYNC2_INVAL);
++    std::lock_guard lk(e->m);
++    vm::write32(out, static_cast<uint32_t>(e->count));
++    ret(ctx, 0);
++}
++
++}  // namespace hle
