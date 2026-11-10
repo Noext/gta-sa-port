@@ -1,0 +1,99 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Project Grove",
+  "repo": "Noext/gta-sa-port",
+  "game": {
+    "kind": "folder",
+    "label": "The extracted PS3 disc folder from your own Grand Theft Auto: San Andreas (BLES02219, Europe, v01.02): the folder that contains PS3_GAME.",
+    "check": { "file": "PS3_DISC.SFB" }
+  },
+  "start": {
+    "program": ["tools/play.sh"],
+    "args": ["--game", "{game}"]
+  },
+  "prepare": {
+    "program": ["tools/prepare.sh"],
+    "args": ["--game", "{game}"],
+    "label": "Checking your disc and building Project Grove on your PC",
+    "timeout": 3600
+  },
+  "looks": {
+    "graphics": "vulkan"
+  },
+  "folders": {
+    "saves": [
+      { "path": "{install}/work/vfs/dev_hdd0/home/00000001/savedata" }
+    ],
+    "logs": [
+      { "path": "{install}/work", "if": "{install}/work" },
+      { "path": "{install}" }
+    ]
+  },
+  "saves": [
+    "{install}/work/vfs/dev_hdd0/home/00000001/savedata"
+  ],
+  "exit_codes": {
+    "1": "Project Grove could not start. Check the log in its folder; if it has never been built, run tools/install.sh in it once.",
+    "2": "The game could not find your copy of San Andreas. Pick your disc folder again on the game's page."
+  },
+  "settings": [
+    {
+      "id": "fullscreen",
+      "label": "Fullscreen",
+      "in": "args",
+      "help": "Fills the screen. F11 or Alt+Enter switches while playing.",
+      "choices": [
+        { "label": "Off", "args": [] },
+        { "label": "On", "args": ["--fullscreen"] }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "in": "args",
+      "help": "What the game draws at. 720p is the console's own; higher needs a faster graphics card.",
+      "choices": [
+        { "label": "720p", "args": [] },
+        { "label": "1080p", "args": ["--scale", "1.5"] },
+        { "label": "1440p", "args": ["--scale", "2"] },
+        { "label": "4K", "args": ["--scale", "3"] }
+      ]
+    },
+    {
+      "id": "fps_counter",
+      "label": "Show FPS",
+      "in": "args",
+      "help": "The frame rate in the corner of the screen.",
+      "choices": [
+        { "label": "On", "args": [] },
+        { "label": "Off", "args": ["--no-fps"] }
+      ]
+    },
+    {
+      "id": "shaders",
+      "label": "Shader compilation",
+      "in": "args",
+      "help": "Asynchronous builds new shaders in the background: no stutter, but a new object can appear a moment late the first time.",
+      "choices": [
+        { "label": "Asynchronous", "args": [] },
+        { "label": "Immediate", "args": ["--no-async-shaders"] }
+      ]
+    },
+    {
+      "id": "sound",
+      "label": "Sound",
+      "in": "args",
+      "help": "Audio output. Leave it on unless your machine has no sound device.",
+      "choices": [
+        { "label": "On", "args": [] },
+        { "label": "Off", "args": ["--no-sound"] }
+      ]
+    }
+  ],
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "Your saved games.", "open": "saves" },
+    { "id": "logs", "label": "Logs", "help": "The game's log, which goes with a bug report.", "open": "logs" },
+    { "id": "shaders", "label": "Shader cache", "help": "Shaders your graphics card has already built, so later areas do not stutter on their first visit. Clearing it only helps if something is drawn wrongly after an update, and the first minutes afterwards are slower.", "clear": "logs/shader_cache" }
+  ]
+}

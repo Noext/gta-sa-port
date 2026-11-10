@@ -1,0 +1,40 @@
+# One release per version tag, with recomplauncher.json at the top of the zip.
+#
+# This port ships sources, not a compiled game: the lift is produced from the
+# player's own disc on their own machine (tools/prepare.sh, which RecompLauncher
+# runs as the setup step). So the release is a source zip, and tools/prepare.sh
+# turns it into a running port at setup time. Nothing here builds, because there
+# is nothing to build from: a checkout with no game files cannot lift the title.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tree is ours
+        run: tools/check-tree.sh
+
+      - name: Validate recomplauncher.json
+        run: |
+          python3 -c 'import json; json.load(open("recomplauncher.json"))'
+          echo "recomplauncher.json is valid JSON"
+
+      - name: Package
+        run: tools/package-release.sh
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

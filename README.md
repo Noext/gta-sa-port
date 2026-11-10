@@ -12,6 +12,8 @@
 ![Linux x64](https://img.shields.io/badge/platform-Linux%20x64-333)
 ![Vulkan](https://img.shields.io/badge/graphics-Vulkan-A41E22)
 
+<a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 **[Status](#status)** · **[Features](docs/FEATURES.md)** · **[Screenshots](docs/SCREENSHOTS.md)** ·
 **[Requirements](docs/requirements.md)** · **[Getting your files](docs/GETTING-FILES.md)** ·
 **[Building](docs/BUILDING.md)** · **[How it works](docs/HOW-IT-WORKS.md)** · **[Known issues](docs/KNOWN_ISSUES.md)** ·
@@ -48,22 +50,31 @@ What works and what does not, item by item: [docs/FEATURES.md](docs/FEATURES.md)
 
 ## Getting it
 
-There is no release yet. From a clone:
+**How to play.** You need your own **Grand Theft Auto: San Andreas** for PS3, the European disc **BLES02219**
+(v01.02). Keep the disc folder where it is: the game reads its four data archives from it, and you do not have to copy
+them anywhere. Then, once, from a clone:
 
 ```sh
 git clone <this repository> gta-sa-port
 cd gta-sa-port
+git clone https://github.com/Noext/ps3base2 third_party/ps3base   # the runtime this port compiles against
 tools/install.sh     # asks where your files are, checks them, lifts and builds
 tools/play.sh        # plays in a window
 ```
 
-You need:
+On RecompLauncher it is shorter: pick your disc folder on the game's page and press Play. The launcher runs
+`tools/prepare.sh` for you, which is the same work without the questions and with a progress line per step.
 
-- your own **Grand Theft Auto: San Andreas** PS3 disc (BLES02219) and a decrypted `EBOOT.elf` from it, plus the four
-  data archives from `PS3_GAME/USRDIR/` (`PS3DataMain.obb`, `PS3Data.obb`, `PS3DataText.zip`, `PS3DataText2.zip`
-  and their `.idx`). What each must be is in [docs/GETTING-FILES.md](docs/GETTING-FILES.md);
+There is no release yet. What you need:
+
+- the decrypted `EBOOT.elf` from your own **BLES02219** disc, the four data archives from `PS3_GAME/USRDIR/`
+  (`PS3DataMain.obb`, `PS3Data.obb`, `PS3DataText.zip`, `PS3DataText2.zip` and their `.idx`), and the seven
+  firmware modules the title imports from. What each must be and where it goes is in
+  [docs/GETTING-FILES.md](docs/GETTING-FILES.md);
 - Linux x64 with clang, CMake, Ninja, Python 3 and the Vulkan headers;
 - a CPU with AVX2 (x86-64-v3) and a Vulkan GPU.
+
+Releases carry `tools/package-release.sh`, which writes the zip with `recomplauncher.json` at its top.
 
 ## How it works, briefly
 
