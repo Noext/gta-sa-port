@@ -16,6 +16,13 @@ in the corner, and the marker above the BMX. The blue triangular artefact beside
 Earlier in the same session: the title screen, the game's own artwork and logo, with the "press a button to continue"
 prompt drawn by the title itself.
 
+## The icon
+
+![The icon](screenshots/icon.png)
+
+A 512×512 square cut from the title screen: the game's own artwork, no HUD and no frame counter. It is the image a
+store listing or a launcher wants, and it is the title's own drawing rather than one made for it.
+
 ## What these do not show
 
 Audio. This machine has no sound device, so `cellAudio` initialises and produces nothing. A screenshot cannot settle
